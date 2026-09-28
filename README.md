@@ -30,7 +30,7 @@ npm run lint       # ESLint (includes bundled starter components)
 - AI tool calls apply immediately. Undo restores the previous map edit; up to 50 edits are retained in memory.
 - Export the current viewport, title, subtitle, and legend as PNG or editable SVG. These are local downloads, not automatic Reddit posts.
 - System appearance by default; the header control cycles System → Light → Dark.
-- Map and conversation state last only for the current page session. Export before refreshing.
+- Chats and their latest maps are saved automatically in this browser. Use Chat history to reopen a conversation and restore its map. New chat starts a fresh map. Delete an individual chat or all chats with confirmation. Deleting the active chat opens a blank map. History is device-local and does not sync between browsers; clearing site data removes it. Undo history resets when opening a saved chat. Browser storage failures are shown without discarding the map in the open tab.
 
 ## Configure an AI provider
 
@@ -46,7 +46,7 @@ Open Settings and enter an API format, base URL, exact model ID, and API key. Se
 
 Base URLs may already include the endpoint. Only HTTPS without URL credentials, query strings, or custom ports is accepted. Other compatible providers are supported; compatibility depends on their tool-calling implementation. Responses mode is available for models that require it.
 
-API keys remain in React memory and are cleared on reload. Only the format, URL, model ID, and theme persist in local browser preferences. Requests to the exact provider host allowlist in `lib/provider.ts` use a transient server relay. The app does not store or log those keys; they do pass through the server to the selected provider. Unlisted hosts are called directly by the browser and must allow CORS. The app never proxies arbitrary URLs or follows provider redirects. Providers receive conversation, current map, and retrieved research; their billing and retention rules apply.
+API keys remain in React memory and are cleared on reload. The format, URL, model ID, and theme persist in local browser preferences. Conversation transcripts and map snapshots are stored separately under `atlas.chat-history.v1`; provider keys and raw API payloads are excluded. Restored conversations continue using portable text messages and source links with the currently configured provider. Requests to the exact provider host allowlist in `lib/provider.ts` use a transient server relay. The app does not store or log those keys; they do pass through the server to the selected provider. Unlisted hosts are called directly by the browser and must allow CORS. The app never proxies arbitrary URLs or follows provider redirects. Providers receive conversation, current map, and retrieved research; their billing and retention rules apply.
 
 ## Research and map tools
 
@@ -69,10 +69,15 @@ This is structured public-data research, not unrestricted web search. Upstream a
 - `app/api/agent/route.ts`: allowlisted provider relay.
 - `app/api/research/route.ts`: restricted public-data retrieval.
 - `lib/export-map.ts`: self-contained SVG and PNG downloads.
-- `tests/core.test.ts`: automated core tests.
+- `lib/chat-history.ts`: versioned, validated browser history and immutable map snapshots.
+- `components/chat-history.tsx`: saved-chat picker and deletion confirmations.
+- `tests/*.test.ts`: core and saved-history regression tests.
 
 Optional `document.modelContext` tools expose `read_map` and `edit_map` using the same map state. Browsers without that experimental API ignore the integration. Registration and state transitions were exercised with a test shim; native WebMCP validation was unavailable.
 
 ## Validation
 
 Core tests and TypeScript checks pass. Browser checks cover projection switching, zoom, manual styles, undo after asynchronous AI edits, theme changes, provider validation, no key persistence, a mocked research/tool loop, both export formats, and narrow-screen overflow. Wikipedia and Wikidata were tested live. A paid-provider round trip requires a visitor's own key and was not run. No shared provider credential is bundled.
+
+History browser checks cover two independent AI-created maps, switching and refreshing, continuing a restored chat after configuring a provider, deletion cancellation, individual deletion of active/inactive chats, bulk deletion surviving reload, mobile layout, and full/disabled storage feedback.
+

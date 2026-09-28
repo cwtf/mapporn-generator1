@@ -57,12 +57,19 @@ import {
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
 import { exportMap } from '@/lib/export-map';
-type Message = {
-  id: number;
-  role: 'user' | 'assistant' | 'activity' | 'error';
-  text: string;
-  sources?: { title: string; url: string }[];
-};
+import ChatHistory from '@/components/chat-history';
+import {
+  HISTORY_KEY,
+  emptyLibrary,
+  parseLibrary,
+  saveChat,
+  deleteChat,
+  serializeLibrary,
+  conversationFromMessages,
+  type Message,
+  type SavedChat,
+  type ChatLibrary,
+} from '@/lib/chat-history';
 type Theme = 'system' | 'light' | 'dark';
 const suggestions = [
   'Highlight the Nordic countries',
@@ -96,8 +103,91 @@ export default function Home() {
   const [titleDraft, setTitleDraft] = useState({ title: '', subtitle: '' });
   const [notice, setNotice] = useState('');
   const messageId = useRef(0);
+  const messagesRef = useRef<Message[]>([]);
+  const libraryRef = useRef<ChatLibrary>(emptyLibrary());
+  const [chats, setChats] = useState<SavedChat[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState('');
+  const historyReady = useRef(false);
+  const persistenceBlocked = useRef(false);
+  function persistLibrary(next: ChatLibrary) {
+    libraryRef.current = next;
+    setChats(next.chats);
+    setActiveChatId(next.activeId);
+    if (persistenceBlocked.current) return;
+    try {
+      localStorage.setItem(HISTORY_KEY, serializeLibrary(next));
+      setHistoryError('');
+    } catch {
+      setHistoryError(
+        'History could not be saved. Browser storage may be full or disabled. Keep this tab open and export your map.',
+      );
+    }
+  }
+  function saveCurrentChat() {
+    if (!historyReady.current) return;
+    const id = libraryRef.current.activeId || crypto.randomUUID();
+    persistLibrary(saveChat(libraryRef.current, id, mapRef.current, messagesRef.current));
+  }
+  function restoreChat(chat?: SavedChat) {
+    const nextMap = structuredClone(chat?.map ?? initialMap);
+    const nextMessages = structuredClone(chat?.messages ?? []);
+    mapRef.current = nextMap;
+    setMap(nextMap);
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+    history.current = conversationFromMessages(nextMessages);
+    messageId.current = Math.max(0, ...nextMessages.map((m) => m.id));
+    pastRef.current = [];
+    setPast([]);
+    setPrompt('');
+    setSelected('');
+    setTitleOpen(false);
+  }
+  function newChat() {
+    if (busyRef.current) return;
+    persistLibrary({ ...libraryRef.current, activeId: null });
+    restoreChat();
+  }
+  function openChat(chat: SavedChat) {
+    if (busyRef.current) return;
+    persistLibrary({ ...libraryRef.current, activeId: chat.id });
+    restoreChat(chat);
+  }
+  function removeChat(id: string) {
+    if (busyRef.current) return;
+    const wasActive = libraryRef.current.activeId === id;
+    persistLibrary(deleteChat(libraryRef.current, id));
+    if (wasActive) restoreChat();
+  }
+  function removeAllChats() {
+    if (busyRef.current) return;
+    persistenceBlocked.current = false;
+    persistLibrary(emptyLibrary());
+    restoreChat();
+  }
+  useEffect(() => {
+    try {
+      const library = parseLibrary(localStorage.getItem(HISTORY_KEY));
+      libraryRef.current = library;
+      setChats(library.chats);
+      setActiveChatId(library.activeId);
+      restoreChat(library.chats.find((c) => c.id === library.activeId));
+    } catch {
+      persistenceBlocked.current = true;
+      setHistoryError(
+        'Saved history could not be loaded. New edits are kept only in this tab; existing browser data has not been overwritten.',
+      );
+    }
+    historyReady.current = true;
+  }, []);
   function addMessage(role: Message['role'], text: string, sources?: Message['sources']) {
-    setMessages((m) => [...m, { id: ++messageId.current, role, text, sources }]);
+    messagesRef.current = [
+      ...messagesRef.current,
+      { id: ++messageId.current, role, text, sources },
+    ];
+    setMessages(messagesRef.current);
+    saveCurrentChat();
   }
   function commit(next: MapState) {
     const snapshot = structuredClone(mapRef.current);
@@ -105,6 +195,7 @@ export default function Home() {
     setPast(pastRef.current);
     mapRef.current = next;
     setMap(next);
+    saveCurrentChat();
   }
   const commitRef = useRef(commit);
   commitRef.current = commit;
@@ -120,6 +211,7 @@ export default function Home() {
     setPast(pastRef.current);
     mapRef.current = previous;
     setMap(previous);
+    saveCurrentChat();
   }
   useEffect(() => {
     try {
@@ -205,8 +297,7 @@ export default function Home() {
       const validated = settingsSchema.parse(draft);
       providerEndpoint(validated);
       setSettings(validated);
-      history.current = [];
-      setMessages([]);
+      history.current = conversationFromMessages(messagesRef.current);
       try {
         localStorage.setItem(
           'atlas.preferences',
@@ -412,7 +503,7 @@ export default function Home() {
           </strong>
         </a>
         <span className="project-label">
-          Map workspace <span className="local-badge">LOCAL SESSION</span>
+          Map workspace <span className="local-badge">SAVED LOCALLY</span>
         </span>
         <div className="header-actions">
           <button
@@ -511,7 +602,12 @@ export default function Home() {
             <h1>{map.title}</h1>
             <p>{map.subtitle}</p>
           </div>
-          <WorldMap map={map} onSelect={selectCountry} svgRef={svg} />
+          <WorldMap
+            key={activeChatId || 'new-chat'}
+            map={map}
+            onSelect={selectCountry}
+            svgRef={svg}
+          />
           {!!map.legend.length && (
             <div className="map-legend">
               {map.legend.map((l, i) => (
@@ -548,21 +644,17 @@ export default function Home() {
               <h2>Map assistant</h2>
               <p>{busy ? 'Creating with you…' : 'Your ideas, mapped out.'}</p>
             </div>
-            {messages.length > 0 && (
-              <button
-                className="icon-button new-chat"
-                title="Start a new chat"
-                aria-label="Start a new chat"
-                disabled={busy}
-                onClick={() => {
-                  history.current = [];
-                  setMessages([]);
-                }}
-              >
-                <RotateCcw size={15} />
-              </button>
-            )}
           </div>
+          <ChatHistory
+            chats={chats}
+            activeId={activeChatId}
+            busy={busy}
+            error={historyError}
+            onOpen={openChat}
+            onNew={newChat}
+            onDelete={removeChat}
+            onDeleteAll={removeAllChats}
+          />
           <div className="agent-body" role="log" aria-live="polite">
             {!messages.length ? (
               <>
@@ -682,7 +774,7 @@ export default function Home() {
               </div>
             </form>
             <p className="composer-footnote">
-              Map & chat last for this session. Export to keep your work.
+              Chats and maps are saved in this browser. API keys are not.
             </p>
           </div>
         </aside>
@@ -801,7 +893,7 @@ export default function Home() {
                 onClick={() => {
                   setSettings((s) => ({ ...s, apiKey: '' }));
                   setDraft((d) => ({ ...d, apiKey: '' }));
-                  history.current = [];
+                  history.current = conversationFromMessages(messagesRef.current);
                   setSettingsOpen(false);
                   setNotice('API key cleared.');
                 }}
