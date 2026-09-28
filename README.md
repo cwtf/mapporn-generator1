@@ -26,7 +26,7 @@ npm run lint       # ESLint (includes bundled starter components)
 
 - Mercator by default, with Equal Earth, Natural Earth, Equirectangular, and Globe projections.
 - Click a country to set its color and label; use Map details for title, subtitle, and country names.
-- Scroll or use the zoom buttons; drag to pan and use Fit world to reset the view.
+- Scroll or use the zoom buttons; drag to pan flat maps or rotate the globe. Fit world resets zoom, position, and globe orientation.
 - AI tool calls apply immediately. Undo restores the previous map edit; up to 50 edits are retained in memory.
 - Export the current viewport, title, subtitle, and legend as PNG or editable SVG. These are local downloads, not automatic Reddit posts.
 - System appearance by default; the header control cycles System → Light → Dark.

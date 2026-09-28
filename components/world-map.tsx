@@ -36,6 +36,7 @@ export default function WorldMap({
   const host = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ k: 1, x: 0, y: 0 });
   const [hover, setHover] = useState('');
+  const [rotation, setRotation] = useState<[number, number]>([-10, -15]);
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const projection = useMemo(() => {
     if (map.projection === 'Mercator')
@@ -53,7 +54,7 @@ export default function WorldMap({
           ? geoNaturalEarth1()
           : map.projection === 'Equirectangular'
             ? geoEquirectangular()
-            : geoOrthographic().rotate([-10, -15]);
+            : geoOrthographic().rotate(rotation);
     return p.fitExtent(
       [
         [20, 20],
@@ -61,10 +62,11 @@ export default function WorldMap({
       ],
       { type: 'Sphere' },
     );
-  }, [map.projection]);
+  }, [map.projection, rotation]);
   const draw = useMemo(() => geoPath(projection), [projection]);
   useEffect(() => {
     setView({ k: 1, x: 0, y: 0 });
+    setRotation([-10, -15]);
   }, [map.projection]);
   function zoom(factor: number) {
     setView((v) => {
@@ -102,7 +104,7 @@ export default function WorldMap({
         role="group"
         aria-label={`${map.projection} world map. Select a country to style it.`}
         onPointerDown={(e) => {
-          if (e.button !== 0) return;
+          if (e.button !== 0 || !e.isPrimary) return;
           drag.current = { x: e.clientX, y: e.clientY, moved: false };
           e.currentTarget.setPointerCapture(e.pointerId);
         }}
@@ -112,9 +114,19 @@ export default function WorldMap({
           const scale = Math.min(r.width / 900, r.height / 550);
           const dx = e.clientX - drag.current.x,
             dy = e.clientY - drag.current.y;
-          if (Math.abs(dx) + Math.abs(dy) > 2) drag.current.moved = true;
-          if (drag.current.moved)
+          // Measure from pointer-down until a drag begins, so slow drags are not mistaken for clicks.
+          if (!drag.current.moved && Math.hypot(dx, dy) < 3) return;
+          drag.current.moved = true;
+          setHover('');
+          if (map.projection === 'Globe') {
+            const degreesPerPixel = 180 / (Math.PI * projection.scale() * scale * view.k);
+            setRotation(([longitude, latitude]) => [
+              ((((longitude + dx * degreesPerPixel + 180) % 360) + 360) % 360) - 180,
+              Math.max(-90, Math.min(90, latitude - dy * degreesPerPixel)),
+            ]);
+          } else {
             setView((v) => ({ ...v, x: v.x + dx / scale, y: v.y + dy / scale }));
+          }
           drag.current.x = e.clientX;
           drag.current.y = e.clientY;
         }}
@@ -123,6 +135,9 @@ export default function WorldMap({
             const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-country]');
             if (hit) onSelect(hit.getAttribute('data-country')!);
           }
+          drag.current = null;
+        }}
+        onLostPointerCapture={() => {
           drag.current = null;
         }}
         onPointerCancel={() => {
@@ -190,7 +205,10 @@ export default function WorldMap({
                     }
                   : geometry;
               const center = geoCentroid(main);
-              if (map.projection === 'Globe' && geoDistance(center, [10, 15]) > Math.PI / 2)
+              if (
+                map.projection === 'Globe' &&
+                geoDistance(center, [-rotation[0], -rotation[1]]) > Math.PI / 2
+              )
                 return null;
               const p = projection(center);
               return (
@@ -213,7 +231,10 @@ export default function WorldMap({
         </g>
       </svg>
       <div className="map-hover" aria-live="polite">
-        {hover || 'Scroll to zoom · Drag to explore'}
+        {hover ||
+          (map.projection === 'Globe'
+            ? 'Scroll to zoom · Drag to rotate'
+            : 'Scroll to zoom · Drag to explore')}
       </div>
       <div className="zoom-controls">
         <button
@@ -237,7 +258,10 @@ export default function WorldMap({
         <button
           title="Fit world"
           aria-label="Fit world"
-          onClick={() => setView({ k: 1, x: 0, y: 0 })}
+          onClick={() => {
+            setView({ k: 1, x: 0, y: 0 });
+            setRotation([-10, -15]);
+          }}
         >
           <Maximize size={17} />
         </button>
