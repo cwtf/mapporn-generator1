@@ -46,11 +46,11 @@ Open Settings and enter an API format, base URL, exact model ID, and API key. Se
 
 Base URLs may already include the endpoint. Only HTTPS without URL credentials, query strings, or custom ports is accepted. Other compatible providers are supported; compatibility depends on their tool-calling implementation. Responses mode is available for models that require it.
 
-API keys remain in React memory and are cleared on reload. The format, URL, model ID, and theme persist in local browser preferences. Conversation transcripts and map snapshots are stored separately under `atlas.chat-history.v1`; provider keys and raw API payloads are excluded. Restored conversations continue using portable text messages and source links with the currently configured provider. Requests to the exact provider host allowlist in `lib/provider.ts` use a transient server relay. The app does not store or log those keys; they do pass through the server to the selected provider. Unlisted hosts are called directly by the browser and must allow CORS. The app never proxies arbitrary URLs or follows provider redirects. Providers receive conversation, current map, and retrieved research; their billing and retention rules apply.
+API keys remain in React memory and are cleared on reload. The format, URL, model ID, and theme persist in local browser preferences. Conversation transcripts and map snapshots are stored separately under `atlas.chat-history.v1`; provider keys and raw API payloads are excluded. Restored conversations continue using portable text messages and source links with the currently configured provider. Requests to the exact provider host allowlist in `lib/provider.ts` use a transient server relay. The app does not store or log those keys; they do pass through the server to the selected provider. Unlisted hosts are called directly by the browser and must allow CORS. The provider relay never proxies arbitrary URLs or follows provider redirects. A separate webpage reader retrieves public HTTPS pages with its own network and content restrictions. Providers receive conversation, current map, and retrieved research; their billing and retention rules apply.
 
 ## Research and map tools
 
-The assistant receives validated `edit_map` and `research` tools. The browser runs a bounded loop (10 model rounds, at most 12 tool calls per round), reports progress, and offers Stop. Invalid country names, colors, or projections reject the entire edit before changing the map. Retrieved source text is treated as untrusted data, and citations appear below research events.
+The assistant receives validated `edit_map`, `research`, and `read_webpage` tools. The browser runs a bounded loop (10 model rounds, at most 12 tool calls per round), reports progress, and offers Stop. Invalid country names, colors, or projections reject the entire edit before changing the map. Retrieved source text is treated as untrusted data, and citations appear below research events.
 
 Research uses public endpoints without a search subscription:
 
@@ -58,7 +58,11 @@ Research uses public endpoints without a search subscription:
 - [Wikidata](https://www.wikidata.org/wiki/Wikidata:Data_access) entity search, entity claims, and bounded SELECT queries; external SPARQL services are disabled.
 - [World Bank indicators](https://datahelpdesk.worldbank.org/knowledgebase/articles/898581-api-basic-call-structures), using an explicit year or the most recent nonempty observation. Observations may have different years and include regional aggregates, which the agent must exclude when matching countries.
 
-This is structured public-data research, not unrestricted web search. Upstream availability, rate limits, and model judgment affect results. Verify dates, units, missing data, and source claims before sharing a statistical map. The bundled [World Atlas](https://github.com/topojson/world-atlas) data uses generalized Natural Earth 1:50m country/territory boundaries and is not a statement on disputed borders. Tiny territories may be absent. Labels use the largest land polygon as their anchor.
+The webpage reader needs no extra account, API key, or subscription. Paste a public HTTPS article URL into chat and ask the agent to read it or map its data. It extracts static HTML/plain text, preserves table row/cell separators, and returns a title, source URL, retrieval time, truncation flag, and up to 30 links. It prefers main/article content and removes scripts, navigation, forms, and explicitly hidden elements. Retrieved text remains untrusted evidence; publication dates and observation years must come from the source.
+
+The reader does not execute JavaScript, log in, read PDFs, bypass site blocks, or follow redirects automatically. A public redirect destination can be opened with a separate validated tool call. Requests have a 25-second deadline, a 2 MB response limit, and a 24,000-character extracted-text limit. It sends no cookies or provider credentials. IP literals, private/reserved DNS answers, URL credentials, non-HTTPS URLs, and custom ports are rejected. DNS validation uses Cloudflare's public DNS-over-HTTPS endpoint without an account or key. Node pins validated DNS addresses to the TLS connection; deployed Cloudflare Workers additionally enforce public-only egress at connection time. Do not replace this transport with a private-network/VPC binding or deploy workerd with private egress enabled. Local Miniflare previews permit private egress by default, so their DNS checks do not provide the same connection-time isolation as production; keep previews on localhost and use trusted sources.
+
+This is structured public-data research and URL reading, not unrestricted web search. Upstream availability, rate limits, and model judgment affect results. Verify dates, units, missing data, and source claims before sharing a statistical map. The bundled [World Atlas](https://github.com/topojson/world-atlas) data uses generalized Natural Earth 1:50m country/territory boundaries and is not a statement on disputed borders. Tiny territories may be absent. Labels use the largest land polygon as their anchor.
 
 ## Architecture
 
@@ -68,6 +72,7 @@ This is structured public-data research, not unrestricted web search. Upstream a
 - `lib/provider.ts`: Chat Completions, Responses, and Claude wire adapters.
 - `app/api/agent/route.ts`: allowlisted provider relay.
 - `app/api/research/route.ts`: restricted public-data retrieval.
+- `app/api/webpage/route.ts` and `lib/webpage-reader.ts`: bounded public-page retrieval and text extraction.
 - `lib/export-map.ts`: self-contained SVG and PNG downloads.
 - `lib/chat-history.ts`: versioned, validated browser history and immutable map snapshots.
 - `components/chat-history.tsx`: saved-chat picker and deletion confirmations.
@@ -81,3 +86,5 @@ Core tests and TypeScript checks pass. Browser checks cover projection switching
 
 History browser checks cover two independent AI-created maps, switching and refreshing, continuing a restored chat after configuring a provider, deletion cancellation, individual deletion of active/inactive chats, bulk deletion surviving reload, mobile layout, and full/disabled storage feedback.
 
+
+Webpage reader validation: 27 automated tests pass, including URL/DNS restrictions, redirect refusal, bounded streaming, HTML extraction, citations, cancellation, credential isolation, and all three provider formats. TypeScript and the production build pass. Live Node and Cloudflare-preview reads succeeded for Example Domain and Wikipedia; a World Bank redirect was returned for a separate read. New reader files pass ESLint; repository-wide lint still reports existing issues elsewhere. Browser automation for this change was unavailable because its Windows sandbox could not start, so the new browser conversation flow and layout were not visually verified.

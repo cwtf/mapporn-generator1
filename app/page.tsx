@@ -414,9 +414,10 @@ export default function Home() {
               const outcome = edit(call.input);
               results.push({ id: call.id, result: outcome });
               addMessage('activity', 'Map updated · Undo is available in the toolbar.');
-            } else if (call.name === 'research') {
-              setActivity('Looking up open data…');
-              const response = await fetch('/api/research', {
+            } else if (call.name === 'research' || call.name === 'read_webpage') {
+              const readingWebpage = call.name === 'read_webpage';
+              setActivity(readingWebpage ? 'Reading webpage…' : 'Looking up open data…');
+              const response = await fetch(readingWebpage ? '/api/webpage' : '/api/research', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(call.input),
@@ -441,13 +442,15 @@ export default function Home() {
                 'activity',
                 research.error
                   ? `Research unavailable: ${research.error}`
-                  : `Read ${research.source.replaceAll('_', ' ')} results`,
+                  : readingWebpage
+                    ? `Read webpage · ${research.sources?.[0]?.title || 'Source'}`
+                    : `Read ${research.source.replaceAll('_', ' ')} results`,
                 research.sources,
               );
             } else
               results.push({
                 id: call.id,
-                result: { error: 'Unknown tool. Use edit_map or research.' },
+                result: { error: 'Unknown tool. Use edit_map, research, or read_webpage.' },
               });
           } catch (e) {
             if (controller.signal.aborted) throw e;
@@ -663,7 +666,8 @@ export default function Home() {
                 </div>
                 <h3>What will you map?</h3>
                 <p>
-                  Turn a question into a map. I can research data, color countries, and add labels.
+                  Turn a question into a map. I can research data, read webpage links, color
+                  countries, and add labels.
                 </p>
                 <div className="suggestions">
                   {suggestions.map((p, i) => (
@@ -686,7 +690,7 @@ export default function Home() {
                   <span>
                     Grounded in open data
                     <br />
-                    <small>Wikipedia, Wikidata & World Bank</small>
+                    <small>Wikipedia, Wikidata, World Bank & webpage links</small>
                   </span>
                 </div>
                 <p className="manual-tip">
@@ -756,7 +760,7 @@ export default function Home() {
               />
               <div>
                 <span>
-                  <Globe2 size={14} /> Open-data research
+                  <Globe2 size={14} /> Open data & webpage links
                 </span>
                 {busy ? (
                   <button
